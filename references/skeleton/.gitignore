@@ -1,0 +1,22 @@
+# Obsidian 工作区状态（不需要版本控制）
+.obsidian/workspace*
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/.gitignore
+
+# Claude Code 内部
+.claude/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+__pycache__/
+*.pyc
