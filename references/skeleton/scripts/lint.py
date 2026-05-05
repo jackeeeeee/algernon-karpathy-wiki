@@ -60,12 +60,34 @@ RELATION_TYPES = [
 def extract_fm_relationships(fm_text):
     """从 frontmatter 文本中提取关系链接列表"""
     links = []
-    for rtype in RELATION_TYPES:
-        pattern = rf'^{rtype}:\s*(?:- "?\[\[([^\]]+)\]\]"?|"\[\[([^\]]+)\]\]"?)'
-        matches = re.findall(pattern, fm_text, re.MULTILINE)
-        for m in matches:
-            link = m[0] or m[1]
-            links.append(link)
+    lines = fm_text.split('\n')
+    in_rel_key = False
+    for line in lines:
+        # Check if this line starts a relationship key
+        matched_key = False
+        for rtype in RELATION_TYPES:
+            if re.match(rf'^{rtype}:\s*$', line):
+                in_rel_key = True
+                matched_key = True
+                break
+            elif re.match(rf'^{rtype}:\s*-', line):
+                # Single-line: key: - "[[...]]"
+                m = re.search(r'\[\[([^\]]+)\]\]', line)
+                if m:
+                    links.append(m.group(1))
+                in_rel_key = False
+                matched_key = True
+                break
+        if matched_key:
+            continue
+        # Check if this line is a list item under a relationship key
+        if in_rel_key:
+            m = re.search(r'\[\[([^\]]+)\]\]', line)
+            if m:
+                links.append(m.group(1))
+            elif re.match(r'^[a-z]', line) and not line.startswith(' '):
+                # New top-level key, stop collecting
+                in_rel_key = False
     return sorted(links)
 
 

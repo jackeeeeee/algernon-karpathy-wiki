@@ -6,7 +6,10 @@ updated: "{{date}}"
 aliases: []
 tags: []
 sources: []
-# 关系字段（编译时 LLM 自动填充）
+part_of: []
+depends_on: []
+triggers: []
+# 其他关系字段按需添加
 ---
 
 # {{title}}

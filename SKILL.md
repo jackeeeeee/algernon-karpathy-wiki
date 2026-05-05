@@ -1,14 +1,13 @@
 ---
-name: llm-wiki
+name: algernon-karpathy-wiki
 description: >
-  LLM-maintained personal knowledge base. Covers seven capabilities:
+  LLM-maintained personal knowledge base. Covers five capabilities:
   (1) Init — bootstrap a fresh knowledge-base directory structure with registry.md.
-  (2) Ingest — single-file import: create source summary + concepts/entities pages.
+  (2) Ingest — single-file import: create source summary + concepts/entities pages + typed relationships.
   (3) Compile — batch incremental compile via registry.md + compile-state.json (hash-based).
-  (4) Lint — health checks: script (broken links/orphans/empty) + LLM (stale/contradiction/low-confidence/gaps/relationship-consistency).
+  (4) Lint — health checks: script (broken links/orphans/empty/relationship-consistency) + LLM (stale/contradiction/low-confidence/gaps).
   (5) Query — answer questions via wiki/index.md, archive to outputs/query-YYYYMMDD.md.
-  (6) Relationships — auto-write typed relationships in frontmatter + body @type links.
-  (7) Git — auto-commit after each wiki operation.
+  Relationships and Git commits are built into every operation automatically.
   Trigger when: 编译知识库、compile wiki、编译、compile、ingest、总结文档、总结资料、
   lint、检查健康、知识库查询、wiki 维护、knowledge base、llm wiki、初始化知识库、init。
 ---
@@ -121,7 +120,7 @@ description: >
    - 提取人物、工具、机构、项目、论文等具体实体
    - 已存在 → 补充，不存在 → 创建
 5. **跨来源合成**：如果新来源涉及多个已有概念的综合对比，考虑在 `wiki/synthesis/` 创建综合分析页
-6. **写入关系字段**：在 frontmatter 中添加关系类型字段（如 `part_of:`、`depends_on:`），同步在正文 `## 关系` 区块写 `@type` 链接。关系字段是编译过程中的必选步骤，确保知识图谱数据的完整性（详见"能力六：关系标注"）
+6. **写入关系字段**：在 frontmatter 中添加关系类型字段（如 `part_of:`、`depends_on:`），同步在正文 `## 关系` 区块写 `@type` 链接。关系标注是编译过程中的必选步骤，即使暂无关系也应保留空 `## 关系` 区块。关系词汇表和写法见底部"参考"部分。
 
 **页面命名规范**：
 - 根据文档内容选择合适的文件名语言（中文或英文 kebab-case），frontmatter 中的 title 字段保持与页面标题一致
@@ -212,11 +211,11 @@ hash 基于内容计算，不随文件移动而变。文件移动但内容不变
 
 ---
 
-## 能力六：关系标注（知识图谱）
+## 参考：关系标注
 
-编译时自动在 wiki 页面中写入类型化关系。关系标注是编译过程中的必选步骤。
+编译时在 wiki 页面中写入类型化关系。采用 YAML frontmatter + 正文 `@type` 链接双写格式。
 
-### 基准关系词汇表
+### 关系词汇表
 
 | 类型 | 含义 | 示例 |
 |------|------|------|
@@ -231,20 +230,18 @@ hash 基于内容计算，不随文件移动而变。文件移动但内容不变
 | part_of | A 属于 B 的子模块 | DGS 告警聚合 part_of DGS |
 | related_to | 其他关联 | 知识管理实践 related_to Karpathy LLM Wiki |
 
+拿不准时先用 `related_to`，后续确认有价值再拆分。已有类型不删除，标记 deprecated 即可。
+
 ### Agent 自主扩展
 
-基准词汇表是起点，不是终点。Agent 在编译时遇到上述类型无法覆盖的关系：
-1. 判断该关系是否在同一领域中多次出现、是否在后续查询中会被明确用到
-2. 如果满足条件，创建新类型（kebab-case 命名，如 escalates_to、routes_to），在此词汇表中追加一行
-3. 在新编译的页面中使用该类型
-
-拿不准时先用 related_to，后续确认有价值再拆分。已有类型不删除，标记 deprecated 即可。
+标准词汇表够用，不新增。Agent 在编译时发现无法涵盖的关系：
+1. 判断该关系是否在同一场景多次出现，是否在后续查询中会被频繁用到
+2. 确认有价值后，以新关系类型（kebab-case 命名，如 `escalates_to`、`routes_to`）在此词汇表追加一行
+3. 后续 wiki 页面统一使用新名称
 
 ### 页面中的写法
 
-关系标注采用 YAML frontmatter + 正文 `@type` 链接双写格式。
-
-**YAML frontmatter（机器读）**：关系类型作为顶层 YAML 键，值为 wikilink 数组。多个目标用多行数组，单个目标也写成数组保持一致性。
+**YAML frontmatter（机器读）**：关系类型作为顶层 YAML 键，值为 wikilink 数组。
 
 ```yaml
 ---
@@ -259,7 +256,7 @@ depends_on:
 ---
 ```
 
-**正文 `## 关系` 区块（人可读）**：使用 `@type` 语法标注在 wikilink alias 中，用箭头区分出向关系。
+**正文 `## 关系` 区块（人可读）**：使用 `@type` 语法标注。
 
 ```markdown
 ## 关系
@@ -273,124 +270,18 @@ depends_on:
 
 ---
 
-## 能力七：Git 自动提交
+## 通用规则
 
-知识库根目录使用本地 git 仓库管理，**每次 wiki 操作完成后自动提交**。
+### Git 自动提交
 
-### 触发时机
+知识库根目录使用本地 git 仓库管理，**每次 wiki 操作完成后自动提交**。不需要远程仓库，纯本地使用。
 
-- **Init 完成后**：`git add + commit` 新创建的结构
-- **Compile/Ingest 完成后**：`git add` 新增/修改的 wiki 文件 + `scripts/compile-state.json` + `raw/registry.md` + `commit`
-- **Lint 完成后**：`git add outputs/lint.md + commit`
-- **Query 归档后**：`git add outputs/query-YYYYMMDD.md + commit`（如果有归档）
+- **Init 完成后**：`git add . && git commit -m "[wiki] init: 初始化知识库结构"`
+- **Compile/Ingest 完成后**：`git add` 新增/修改的 wiki 文件 + `scripts/compile-state.json` + `raw/registry.md` + `git commit -m "[wiki] compile: ..."`
+- **Lint 完成后**：`git add outputs/lint.md && git commit -m "[wiki] lint: ..."`
+- **Query 归档后**：`git add outputs/query-YYYYMMDD.md && git commit -m "[wiki] query: ..."`（如果有归档）
 
-### 提交格式
-
-```
-[wiki] compile: 处理 3 个文件，创建 14 概念页
-[wiki] ingest: dgs-module.md（外部源）
-[wiki] lint: 发现 2 断链，已修复
-[wiki] query: DGS 节点离线排查
-[wiki] init: 初始化知识库结构
-```
-
-**注意**：
-- 不需要远程仓库，纯本地使用
-- 打包迁移时 `.git` 目录一起带走，保留完整历史
-
----
-
-## 页面模板
-
-所有 wiki 页面必须遵循以下模板结构：
-
-```markdown
----
-title: 页面标题
-kind: concept|entity|synthesis|overview|log|questions
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-aliases: [别名1, 别名2]
-tags: [标签1, 标签2]
-sources:
-  - raw/articles/karpathy-llm-wiki-research.md
-  - personal-dev-clone/dgs-module.md
----
-
-# 页面标题
-
-**Summary**: 一句话概括页面核心内容。
-
----
-
-## 正文内容
-
-内容按逻辑分节。关键断言标注来源：^[raw/articles/来源.md]
-
-## 关系
-
-- → [[相关概念A|相关概念A @part_of]]
-
-## 相关链接
-
-- [[相关概念A]]
-- [[相关实体B]]
-```
-
-**页面类型说明**：
-- `concept`：思想、模式、技术
-- `entity`：人物、工具、机构、项目、论文
-- `synthesis`：跨来源的对比分析、综合论述
-- `overview`：领域综述页，连接多个概念
-- `log`：追加式操作日志（`graph-excluded: true`）
-- `questions`：开放问题队列
-
-**关系字段（frontmatter + 正文 `## 关系`）是编译时的必选步骤**，即使暂无关系也应保留空 `## 关系` 区块。
-
-**空段落是有意为之的结构信号**。页面中如"暂无数据"、"待补充"等标记告诉后续 LLM 该关注哪些信息缺口。编译时应主动填充这些空段落。
-
----
-
-## 索引文件格式
-
-`wiki/index.md` 格式：
-
-```markdown
-# 知识库索引
-
-最后更新：YYYY-MM-DD
-
-## Concepts（概念）
-- [[概念A]] - 一句话摘要
-
-## Entities（实体）
-- [[实体X]] - 一句话摘要
-
-## Synthesis（合成分析）
-- [[分析Y]] - 一句话摘要
-
-## Sources（来源摘要）
-- [[来源Z]] - 一句话摘要
-```
-
-## 日志文件格式
-
-`wiki/log.md` 追加式记录：
-
-```markdown
-# 操作日志
-
-## [YYYY-MM-DD] compile | 指定目录: D:\skill\...\references\
-处理了 personal-dev-clone/dgs-module.md，创建了 N 个概念页，更新了 M 个实体页。
-
-## [YYYY-MM-DD] query | DGS节点离线排查
-查询了DGS节点离线相关问题，答案归档至 outputs/query-20260430.md。
-
-## [YYYY-MM-DD] lint
-发现 N 个断链，M 个孤儿页，已修复。
-```
-
-## 注意事项
+### 注意事项
 
 1. **不要过度拆分**：一个概念一页即可，不要为了数量拆成多页
 2. **保持术语一致**：同一概念全文统一名称，aliases 字段记录别名
@@ -401,3 +292,4 @@ sources:
 7. **来源标注不可省**：每个关键断言后必须加 `^[来源路径]`
 8. **overview 同步更新**：每次编译后刷新 overview.md 中的 Health Dashboard 统计
 9. **首次编译可能产生大量页面**：一个 rich 的源文件可能联动创建 10-20 个 wiki 页面，请耐心等待完成。
+10. **关系标注不可省**：关系字段是编译时的必选步骤，即使暂无关系也应保留空 `## 关系` 区块。
