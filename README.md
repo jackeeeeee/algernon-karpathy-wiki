@@ -52,7 +52,7 @@ This skill implements Karpathy's alternative: instead of retrieving from raw doc
 
 ## Features
 
-### Seven Capabilities
+### Capabilities
 
 | # | Capability | Description |
 |---|------------|-------------|
@@ -61,8 +61,8 @@ This skill implements Karpathy's alternative: instead of retrieving from raw doc
 | 3 | **Compile** | Batch incremental compile — MD5 hash-based change detection, processes only changed files |
 | 4 | **Lint** | Health checks — broken links, orphans, empty pages (Python script) + stale claims, contradictions, low-confidence, knowledge gaps (LLM) |
 | 5 | **Query** | Answer questions via `wiki/index.md` → relevant pages, archive valuable answers to `outputs/` |
-| 6 | **Relationships** | Auto-write typed relationships in YAML frontmatter + `@type` links in body — supports Obsidian Graph View |
-| 7 | **Git** | Auto-commit after every wiki operation — local-only, full version history |
+
+Relationships and Git commits are **built-in behaviors** — automatically executed during every Ingest/Compile operation, not standalone capabilities.
 
 ### Key Design Decisions
 
