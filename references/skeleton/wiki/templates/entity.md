@@ -1,6 +1,7 @@
 ---
 title: "{{title}}"
 kind: entity
+slug: entities/{{slug}}
 created: "{{date}}"
 updated: "{{date}}"
 aliases: []
@@ -25,9 +26,9 @@ _关键属性、背景信息_
 
 ## 关系
 
-- → [[相关概念|相关概念 @part_of]]
+- → [[concepts/related-concept|相关概念 @part_of]]
 
 ## 相关链接
 
-- _相关概念 wikilink_
-- _相关实体 wikilink_
+- [[concepts/related-concept|相关概念]]
+- [[entities/related-entity|相关实体]]

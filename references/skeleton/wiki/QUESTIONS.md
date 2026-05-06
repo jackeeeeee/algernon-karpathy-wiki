@@ -1,6 +1,7 @@
 ---
 title: 开放问题队列
 kind: questions
+slug: QUESTIONS
 created: "{{date}}"
 updated: "{{date}}"
 aliases: []

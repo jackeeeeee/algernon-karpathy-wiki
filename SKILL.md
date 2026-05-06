@@ -111,6 +111,51 @@ wiki 中所有机器关键入口必须使用 canonical wikilink：`[[相对文�
 
 ---
 
+## Identity Resolution 规则
+
+每个 wiki 页面必须有稳定的机器身份。`slug` 是机器身份，`title` 是人类显示名。
+
+**页面 frontmatter 必填字段**：
+
+```yaml
+title: NMS 部署流程
+kind: concept
+slug: concepts/nms-deploy
+aliases:
+  - 部署
+  - 换包
+sources:
+  - personal-dev-clone/references/nms-deploy.md
+```
+
+规则：
+- `slug` 必须等于该页面相对于 `wiki/` 的路径，去掉 `.md`，并使用 `/` 分隔；例如 `wiki/concepts/nms-deploy.md` 的 slug 必须是 `concepts/nms-deploy`。
+- `kind` 必须与目录语义一致：`concept`、`entity`、`source`、`synthesis`、`overview`、`log`、`questions`。
+- canonical link 永远由 `slug` 生成：`[[concepts/nms-deploy|NMS 部署流程]]`。
+- `title` 可重复用于人类显示，但不能作为机器身份。source 页和 concept 页允许同名，但必须通过不同 `slug` 消歧。
+- `aliases` 是入口词。alias 冲突会影响查询和更新，除非明确设计为同一页面，否则不得在多个页面重复。
+
+**新建或更新页面前必须执行 identity resolution**：
+
+1. 用脚本或确定性扫描读取 `wiki/**/*.md` 的 frontmatter，排除 `wiki/templates/`。
+2. 构建 identity map：
+   - `slug -> page`
+   - `title -> pages`
+   - `alias -> pages`
+   - `source path -> source page`
+3. 判断候选概念/实体/来源是否已存在：
+   - slug 命中 → 更新原页。
+   - alias 单一命中 → 更新原页，并确认是否需要补充 alias。
+   - title 多命中 → 按 `kind` 和上下文消歧；source 与 concept 同名时优先按任务意图选择。
+   - 无命中 → 新建页面。
+4. 多命中且无法消歧时，不静默任选；写入 `wiki/QUESTIONS.md` 并在回复中请用户确认。
+
+**脚本与 LLM 分工**：
+- 脚本负责扫描 frontmatter、生成 identity map、发现缺失和冲突。
+- LLM 只负责脚本标出的语义歧义，例如 alias 归属、页面归类、是否合并。
+
+---
+
 ## 能力一：Init（初始化）
 
 当用户要求"初始化知识库"或"init"时，执行此能力。
@@ -163,6 +208,8 @@ wiki 中所有机器关键入口必须使用 canonical wikilink：`[[相对文�
    ```markdown
    ---
    title: 来源标题
+   kind: source
+   slug: sources/来源-slug
    sources:
      - personal-dev-clone/文件名.md
    ingested: YYYY-MM-DD
@@ -189,7 +236,9 @@ wiki 中所有机器关键入口必须使用 canonical wikilink：`[[相对文�
 6. **写入关系字段**：在 frontmatter 中添加关系类型字段（如 `part_of:`、`depends_on:`），同步在正文 `## 关系` 区块写 `@type` 链接。关系标注是编译过程中的必选步骤，即使暂无关系也应保留空 `## 关系` 区块。关系词汇表和写法见底部"参考"部分。
 
 **页面命名规范**：
-- 根据文档内容选择合适的文件名语言（中文或英文 kebab-case），frontmatter 中的 title 字段保持与页面标题一致
+- 根据文档内容选择稳定 slug（推荐英文 kebab-case；确需中文时也必须稳定）
+- frontmatter 中 `title` 保持人类可读标题，`slug` 必须等于相对路径去掉 `.md`
+- 新建页面前先执行 Identity Resolution 规则，避免重复建页
 
 **来源标注**：正文中每个关键断言后加 `^[来源路径]`，例如：
 > LLM 消除了知识维护的簿记难题。^[raw/articles/karpathy-llm-wiki-research.md]
@@ -221,7 +270,7 @@ wiki 中所有机器关键入口必须使用 canonical wikilink：`[[相对文�
      - 文件已删除（在 state 中但磁盘不存在）→ 标记为 deleted
 4. **处理文件**：对标记为 ingest/update 的文件执行 Ingest 流程
 5. **更新编译状态**：将所有处理过的文件写入 compile-state.json，记录当前 hash 和对应的 wiki 页面
-6. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 时必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
+6. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 前先扫描 frontmatter 构建 identity map，再按 `kind` 分组生成条目。index.md 必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
 7. **报告编译结果**：处理了多少文件，创建/更新了多少页面，跳过了多少
 
 **编译状态文件格式**：
@@ -256,6 +305,7 @@ hash 基于内容计算，不随文件移动而变。文件移动但内容不变
 3. 空页面检测：内容仅模板占位符
 4. 关系一致性：自动比对 frontmatter 与正文的关系字段是否一致
 5. Canonical link 检查：`index.md` 和机器关键入口不能使用只能靠 title 解析的 wikilink
+6. Identity 检查：缺 `slug`、slug 与路径不一致、slug 冲突、alias 冲突、同 kind title 重复
 
 **LLM 专属检查**（脚本无法替代）：
 5. **过时断言**：扫描"目前/现在/latest/currently"等时间词，**仅当同句有版本号或具体日期时才标记**

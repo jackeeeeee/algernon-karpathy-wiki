@@ -51,6 +51,31 @@ def get_title_from_frontmatter(frontmatter):
     return match.group(1).strip().strip('"').strip("'") if match else None
 
 
+def get_field_from_frontmatter(frontmatter, field):
+    """提取 frontmatter 单行字段"""
+    match = re.search(rf'^{re.escape(field)}:\s*(.+)$', frontmatter, re.MULTILINE)
+    return match.group(1).strip().strip('"').strip("'") if match else None
+
+
+def get_list_field_from_frontmatter(frontmatter, field):
+    """提取 frontmatter 列表字段"""
+    lines = frontmatter.split('\n')
+    values = []
+    in_list = False
+    for line in lines:
+        if re.match(rf'^{re.escape(field)}:\s*$', line):
+            in_list = True
+            continue
+        if in_list:
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_-]*:\s*', line):
+                break
+            m = re.match(r'^\s*-\s*(.+)$', line)
+            if m:
+                value = m.group(1).strip().strip('"').strip("'")
+                values.append(value)
+    return values
+
+
 def normalize_link_target(target):
     """规范化 wikilink 目标，移除锚点、扩展名并统一路径分隔符"""
     target = target.split('#', 1)[0].replace('\\', '/').strip()
@@ -83,6 +108,39 @@ def build_link_index(wiki_dir):
             link_index[title] = f
 
     return link_index, path_stems
+
+
+def normalize_slug(slug):
+    return slug.replace('\\', '/').strip().rstrip('/')
+
+
+def build_identity_maps(wiki_dir):
+    """构建 identity maps，用于检查 title/slug/alias 冲突"""
+    pages = []
+    md_files = find_md_files(wiki_dir)
+
+    for f in md_files:
+        rel_path = os.path.relpath(f, wiki_dir)
+        if is_template_file(rel_path):
+            continue
+
+        content = open(f, 'r', encoding='utf-8').read()
+        fm = extract_frontmatter(content)
+        title = get_title_from_frontmatter(fm) or os.path.splitext(os.path.basename(f))[0]
+        slug = get_field_from_frontmatter(fm, 'slug')
+        kind = get_field_from_frontmatter(fm, 'kind')
+        aliases = get_list_field_from_frontmatter(fm, 'aliases')
+
+        pages.append({
+            'path': Path(rel_path).with_suffix('').as_posix(),
+            'rel_path': rel_path,
+            'title': title,
+            'slug': normalize_slug(slug) if slug else None,
+            'kind': kind,
+            'aliases': aliases,
+        })
+
+    return pages
 
 
 # --- 关系类型关键词 ---
@@ -215,6 +273,48 @@ def check_index_canonical_links(wiki_dir):
     return issues
 
 
+def check_identity_consistency(wiki_dir):
+    """检查 slug、kind、title、alias 的 identity 一致性"""
+    issues = []
+    pages = build_identity_maps(wiki_dir)
+    title_map = {}
+    slug_map = {}
+    alias_map = {}
+
+    for page in pages:
+        if not page['kind']:
+            issues.append(f"  身份缺失: {page['rel_path']} 缺少 kind")
+        if not page['slug']:
+            issues.append(f"  身份缺失: {page['rel_path']} 缺少 slug")
+        elif page['slug'] != page['path']:
+            issues.append(f"  slug 不一致: {page['rel_path']} 的 slug='{page['slug']}'，但路径应为 '{page['path']}'")
+
+        title_map.setdefault(page['title'], []).append(page['rel_path'])
+        if page['slug']:
+            slug_map.setdefault(page['slug'], []).append(page['rel_path'])
+        for alias in page['aliases']:
+            alias_map.setdefault(alias, []).append(page['rel_path'])
+
+    for slug, paths in slug_map.items():
+        if len(paths) > 1:
+            issues.append(f"  slug 冲突: {slug} => {', '.join(paths)}")
+
+    for title, paths in title_map.items():
+        kinds = set()
+        for rel_path in paths:
+            for page in pages:
+                if page['rel_path'] == rel_path and page['kind']:
+                    kinds.add(page['kind'])
+        if len(paths) > 1 and len(kinds) == 1:
+            issues.append(f"  title 重复: {title} => {', '.join(paths)}")
+
+    for alias, paths in alias_map.items():
+        if len(paths) > 1:
+            issues.append(f"  alias 冲突: {alias} => {', '.join(paths)}")
+
+    return issues
+
+
 def check_orphan_pages(wiki_dir):
     """检查孤儿页（无入链的页面，排除 index.md/overview.md/log.md/QUESTIONS.md 和 templates/ 目录）"""
     issues = []
@@ -326,12 +426,22 @@ def main():
     else:
         print("  通过")
 
-    print("\n[5/5] 检查 index canonical links...")
+    print("\n[5/6] 检查 index canonical links...")
     canonical_issues = check_index_canonical_links(wiki_dir)
     if canonical_issues:
         all_issues.extend(canonical_issues)
         print(f"  发现 {len(canonical_issues)} 个问题")
         for issue in canonical_issues:
+            print(issue)
+    else:
+        print("  通过")
+
+    print("\n[6/6] 检查 identity 一致性...")
+    identity_issues = check_identity_consistency(wiki_dir)
+    if identity_issues:
+        all_issues.extend(identity_issues)
+        print(f"  发现 {len(identity_issues)} 个问题")
+        for issue in identity_issues:
             print(issue)
     else:
         print("  通过")

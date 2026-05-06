@@ -1,6 +1,7 @@
 ---
 title: 知识库综述
 kind: overview
+slug: overview
 created: "{{date}}"
 updated: "{{date}}"
 aliases: []
@@ -31,4 +32,4 @@ _待编译_
 
 ## 待解决问题
 
-见 [[QUESTIONS]]
+见 [[QUESTIONS|开放问题队列]]

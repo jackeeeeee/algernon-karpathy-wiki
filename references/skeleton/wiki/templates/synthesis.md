@@ -1,6 +1,7 @@
 ---
 title: "{{title}}"
 kind: synthesis
+slug: synthesis/{{slug}}
 created: "{{date}}"
 updated: "{{date}}"
 aliases: []
@@ -40,9 +41,9 @@ _综合分析得出的结论_
 
 ## 关系
 
-- → [[相关概念|相关概念 @related_to]]
+- → [[concepts/related-concept|相关概念 @related_to]]
 
 ## 相关链接
 
-- _相关概念 A wikilink_
-- _相关实体 B wikilink_
+- [[concepts/related-concept|相关概念 A]]
+- [[entities/related-entity|相关实体 B]]

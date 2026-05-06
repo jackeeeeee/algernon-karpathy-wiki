@@ -1,6 +1,7 @@
 ---
 title: "{{title}}"
 kind: concept
+slug: concepts/{{slug}}
 created: "{{date}}"
 updated: "{{date}}"
 aliases: []
@@ -24,8 +25,8 @@ _在此编写内容，关键断言标注来源：^[raw/来源路径]_
 
 ## 关系
 
-- → [[相关概念|相关概念 @part_of]]
+- → [[concepts/related-concept|相关概念 @part_of]]
 
 ## 相关链接
 
-- _相关页面 wikilink_
+- [[concepts/related-concept|相关概念]]

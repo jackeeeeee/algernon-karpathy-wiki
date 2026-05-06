@@ -1,6 +1,7 @@
 ---
 title: 知识库索引
 kind: overview
+slug: index
 created: "{{date}}"
 updated: "{{date}}"
 aliases: []

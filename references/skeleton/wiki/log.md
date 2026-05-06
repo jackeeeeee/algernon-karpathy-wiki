@@ -1,6 +1,7 @@
 ---
 title: 操作日志
 kind: log
+slug: log
 created: "{{date}}"
 updated: "{{date}}"
 graph-excluded: true
