@@ -22,13 +22,13 @@ description: >
 ```
 <target_dir>/
 ├── raw/              # 原始资料（人类所有，LLM 只读，绝不修改）
-│   ├── registry.md   # 源文件目录注册表（LLM 编译时先读此文件定位源文件）
-│   ├── articles/     # Markdown 文章
-│   ├── clippings/    # Obsidian Web Clipper 剪藏
+│   ├── registry.md   # 外部来源注册表（raw 内置 Markdown 目录会自动扫描）
+│   ├── articles/     # Markdown 文章（自动扫描）
+│   ├── clippings/    # Obsidian Web Clipper 剪藏（自动扫描）
 │   ├── images/       # 截图和图片
 │   ├── pdfs/         # PDF 及配套元数据
-│   ├── notes/        # 随手记录（可选，现多用外部 reference）
-│   └── personal/     # 自己写的文章、分析报告、投资笔记
+│   ├── notes/        # 随手记录（自动扫描）
+│   └── personal/     # 自己写的文章、分析报告、投资笔记（自动扫描）
 ├── wiki/             # 编译层（LLM 全权拥有，人类只读不编辑）
 │   ├── index.md      # 全局索引（查询第一入口）
 │   ├── log.md        # 追加式操作日志（graph-excluded: true）
@@ -254,9 +254,9 @@ sources:
 一篇新来源通常联动更新 **5-15 个 wiki 页面**。
 
 **用户聊天框临时发文件**：如果用户直接在聊天框拖入文件要求编译：
-1. 将文件保存到 `raw/articles/` 下（按日期命名，如 `user-upload-20260505.md`）
+1. 将文件保存到 `raw/articles/`、`raw/notes/`、`raw/personal/` 或 `raw/clippings/` 下（按日期命名，如 `user-upload-20260505.md`）
 2. 按正常 Ingest 流程处理，source 字段写 `raw/articles/文件名.md`
-3. 无需经过 registry.md
+3. 无需经过 registry.md；下一次 Compile 会由 `scan_sources.py` 自动扫描 raw 内置目录
 
 ---
 
@@ -266,7 +266,7 @@ sources:
 
 **流程**：
 
-1. **生成 compile plan**：运行 `scripts/scan_sources.py`，严格校验 `raw/registry.md`，扫描源文件，计算 hash，对比 `scripts/compile-state.json`，输出 `scripts/compile-plan.json`。
+1. **生成 compile plan**：运行 `scripts/scan_sources.py`，先扫描内置 raw Markdown 目录（`raw/articles`、`raw/notes`、`raw/personal`、`raw/clippings`），再严格校验 `raw/registry.md` 并扫描启用的外部来源，计算 hash，对比 `scripts/compile-state.json`，输出 `scripts/compile-plan.json`。
 2. **失败即停**：如果脚本退出码非 0，或 `compile-plan.json` 中 `status` 为 `error`，停止 Compile；向用户报告 registry/schema/path 错误，不继续读取源文件。
 3. **处理变更文件**：只处理 plan 中 `action` 为 `ingest`、`update`、`delete` 的项目：
    - `ingest`：新来源，执行 Ingest 流程。
@@ -279,12 +279,15 @@ sources:
 7. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 前先读取 `canonical_map.json` 或扫描 frontmatter 构建 identity map，再按 `kind` 分组生成条目。index.md 必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
 8. **运行 lint 并报告结果**：报告 ingest/update/delete/skip/error 数量，创建/更新了多少页面，跳过了多少。
 
-### Registry schema
+### External registry schema
 
-`raw/registry.md` 是 Compile 的稳定输入契约，必须使用固定 Markdown 表格：
+`raw/registry.md` 只用于注册外部目录或外部文件，是 Compile 的稳定输入契约，必须使用固定 Markdown 表格。知识库自身的 `raw/articles`、`raw/notes`、`raw/personal`、`raw/clippings` 会自动扫描，不要在 registry 中重复注册。
 
 ```markdown
-# Source Registry
+# External Source Registry
+
+Compile scans raw/articles, raw/notes, raw/personal, and raw/clippings automatically.
+Use this table only for external source directories or files. Do not rename columns.
 
 | logical | path | kind | include | exclude | enabled |
 |---|---|---|---|---|---|
@@ -299,6 +302,7 @@ sources:
 - `kind=directory` 时 `include` 必填；`exclude` 可空，多个 glob 用 `;` 分隔。
 - `enabled` 只能是 `true` 或 `false`。
 - registry 校验失败时，不继续 Compile。
+- `compile-plan.json` 中每个 item 会包含 `sourceType`：`raw` 表示来自知识库内置 raw 目录，`registry` 表示来自外部注册源。
 
 **编译状态文件格式**：
 ```json

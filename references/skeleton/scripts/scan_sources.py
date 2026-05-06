@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Generate a deterministic compile plan from raw/registry.md.
+Generate a deterministic compile plan from raw sources and raw/registry.md.
 
-This script validates the registry schema, scans enabled sources, hashes files,
-and compares them with scripts/compile-state.json. It writes
-scripts/compile-plan.json and does not modify compile-state.json or wiki pages.
+This script scans built-in raw Markdown folders, validates the external source
+registry schema, scans enabled external sources, hashes files, and compares them
+with scripts/compile-state.json. It writes scripts/compile-plan.json and does not
+modify compile-state.json or wiki pages.
 """
 
 import argparse
@@ -21,6 +22,9 @@ REQUIRED_COLUMNS = ["logical", "path", "kind", "include", "exclude", "enabled"]
 VALID_KINDS = {"directory", "file"}
 VALID_ENABLED = {"true", "false"}
 LOGICAL_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+RAW_SOURCE_DIRS = ["articles", "notes", "personal", "clippings"]
+RAW_INCLUDE = ["**/*.md"]
+RAW_EXCLUDE = [".gitkeep"]
 
 
 def posix(path):
@@ -57,6 +61,7 @@ def make_plan(root, registry_path, state_path):
         "generatedAt": now_iso(),
         "root": posix(root),
         "registry": posix(registry_path.relative_to(root)),
+        "rawSources": [f"raw/{name}" for name in RAW_SOURCE_DIRS],
         "state": posix(state_path.relative_to(root)),
         "summary": empty_summary(),
         "items": [],
@@ -207,6 +212,25 @@ def discover_files(entry):
     return files
 
 
+def discover_raw_files(root):
+    files = []
+    raw_root = root / "raw"
+    for source_dir in RAW_SOURCE_DIRS:
+        source_path = raw_root / source_dir
+        if not source_path.is_dir():
+            continue
+        for path in sorted(p for p in source_path.rglob("*") if p.is_file()):
+            rel = path.relative_to(source_path).as_posix()
+            if path.name == ".gitkeep":
+                continue
+            if RAW_INCLUDE and not matches_any(rel, RAW_INCLUDE):
+                continue
+            if RAW_EXCLUDE and matches_any(rel, RAW_EXCLUDE):
+                continue
+            files.append((path, path.relative_to(root).as_posix()))
+    return files
+
+
 def find_state_entry(files_state, logical_path):
     if logical_path in files_state:
         return logical_path, files_state[logical_path]
@@ -214,6 +238,35 @@ def find_state_entry(files_state, logical_path):
     if len(parts) == 2 and parts[1] in files_state:
         return parts[1], files_state[parts[1]]
     return None, None
+
+
+def append_plan_item(plan, files_state, seen_state_keys, seen_logical_paths, abs_path, logical, logical_path, source_type):
+    file_hash = md5_8(abs_path)
+    state_key, state_entry = find_state_entry(files_state, logical_path)
+    if state_key:
+        seen_state_keys.add(state_key)
+    seen_logical_paths.add(logical_path)
+
+    previous_hash = state_entry.get("hash") if state_entry else None
+    if state_entry is None:
+        action = "ingest"
+    elif previous_hash == file_hash:
+        action = "skip"
+    else:
+        action = "update"
+
+    plan["summary"][action] += 1
+    plan["items"].append({
+        "action": action,
+        "sourceType": source_type,
+        "logical": logical,
+        "logicalPath": logical_path,
+        "stateKey": state_key,
+        "absolutePath": posix(abs_path),
+        "hash": file_hash,
+        "previousHash": previous_hash,
+        "wikiPages": state_entry.get("wikiPages", []) if state_entry else [],
+    })
 
 
 def build_plan(root):
@@ -235,34 +288,31 @@ def build_plan(root):
     seen_state_keys = set()
     seen_logical_paths = set()
 
+    for abs_path, logical_path in discover_raw_files(root):
+        append_plan_item(
+            plan,
+            files_state,
+            seen_state_keys,
+            seen_logical_paths,
+            abs_path,
+            "raw",
+            logical_path,
+            "raw",
+        )
+
     for entry in entries:
         for abs_path, rel_path in discover_files(entry):
             logical_path = f"{entry['logical']}/{rel_path}".replace("\\", "/")
-            file_hash = md5_8(abs_path)
-            state_key, state_entry = find_state_entry(files_state, logical_path)
-            if state_key:
-                seen_state_keys.add(state_key)
-            seen_logical_paths.add(logical_path)
-
-            previous_hash = state_entry.get("hash") if state_entry else None
-            if state_entry is None:
-                action = "ingest"
-            elif previous_hash == file_hash:
-                action = "skip"
-            else:
-                action = "update"
-
-            plan["summary"][action] += 1
-            plan["items"].append({
-                "action": action,
-                "logical": entry["logical"],
-                "logicalPath": logical_path,
-                "stateKey": state_key,
-                "absolutePath": posix(abs_path),
-                "hash": file_hash,
-                "previousHash": previous_hash,
-                "wikiPages": state_entry.get("wikiPages", []) if state_entry else [],
-            })
+            append_plan_item(
+                plan,
+                files_state,
+                seen_state_keys,
+                seen_logical_paths,
+                abs_path,
+                entry["logical"],
+                logical_path,
+                "registry",
+            )
 
     for state_key, state_entry in sorted(files_state.items()):
         if state_key in seen_state_keys:
@@ -297,7 +347,7 @@ def print_summary(plan):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate scripts/compile-plan.json from raw/registry.md")
+    parser = argparse.ArgumentParser(description="Generate scripts/compile-plan.json from raw sources and raw/registry.md")
     parser.add_argument("--root", help="Knowledge base root. Defaults to scripts/..")
     args = parser.parse_args()
 
