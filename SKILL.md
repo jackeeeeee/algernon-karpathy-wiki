@@ -44,6 +44,8 @@ description: >
 │   └── query-YYYYMMDD.md # 查询答案（按日期分文件）
 ├── scripts/          # 自动化脚本
 │   ├── lint.py              # Wiki 健康检查脚本
+│   ├── build-canonical-map.py # 编译身份映射的生成脚本
+│   ├── canonical_map.json    # 编译生成的身份索引缓存
 │   ├── compile-state.json   # 编译状态（源文件 hash 和 wikiPages 映射）
 │   └── qmd-reindex.sh       # qmd 索引重建脚本
 ├── CLAUDE.md         # LLM 行为契约
@@ -153,6 +155,7 @@ sources:
 **脚本与 LLM 分工**：
 - 脚本负责扫描 frontmatter、生成 identity map、发现缺失和冲突。
 - LLM 只负责脚本标出的语义歧义，例如 alias 归属、页面归类、是否合并。
+- `canonical_map.json` 是编译生成的身份缓存，不手工维护；compile 负责生成，query/lint 负责读取。
 
 ---
 
@@ -270,8 +273,9 @@ sources:
      - 文件已删除（在 state 中但磁盘不存在）→ 标记为 deleted
 4. **处理文件**：对标记为 ingest/update 的文件执行 Ingest 流程
 5. **更新编译状态**：将所有处理过的文件写入 compile-state.json，记录当前 hash 和对应的 wiki 页面
-6. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 前先扫描 frontmatter 构建 identity map，再按 `kind` 分组生成条目。index.md 必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
-7. **报告编译结果**：处理了多少文件，创建/更新了多少页面，跳过了多少
+6. **生成 canonical_map.json**：调用 `scripts/build-canonical-map.py` 扫描 `wiki/**/*.md` 和 frontmatter，输出 `scripts/canonical_map.json`。
+7. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 前先读取 `canonical_map.json` 或扫描 frontmatter 构建 identity map，再按 `kind` 分组生成条目。index.md 必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
+8. **报告编译结果**：处理了多少文件，创建/更新了多少页面，跳过了多少
 
 **编译状态文件格式**：
 ```json
@@ -306,6 +310,7 @@ hash 基于内容计算，不随文件移动而变。文件移动但内容不变
 4. 关系一致性：自动比对 frontmatter 与正文的关系字段是否一致
 5. Canonical link 检查：`index.md` 和机器关键入口不能使用只能靠 title 解析的 wikilink
 6. Identity 检查：缺 `slug`、slug 与路径不一致、slug 冲突、alias 冲突、同 kind title 重复
+7. Canonical map 检查：`scripts/canonical_map.json` 与 frontmatter 一致，且由 compile 自动生成
 
 **LLM 专属检查**（脚本无法替代）：
 5. **过时断言**：扫描"目前/现在/latest/currently"等时间词，**仅当同句有版本号或具体日期时才标记**
@@ -335,13 +340,20 @@ LLM 自行判断问题意图类型，选择对应检索策略：
 ### 检索流程
 
 ```
-用户问题 → LLM 判断意图类型 → 读 index.md 定位候选页面
+用户问题 → LLM 判断意图类型 → 先读 `scripts/canonical_map.json`
+  → 用 title / alias / slug / source 解析候选页面
+  → 读 `wiki/index.md` 确认候选页面的分类与简述
   → 根据 canonical link 直接读取目标页面（含 frontmatter 关系字段）
   → 综合回答（精准、克制，只回答所问） → 判断是否归档
 ```
 
-- **第一入口始终是 `wiki/index.md`**：它包含所有页面的分类索引和一句话描述
-- **Canonical link 直接打开**：index.md 的链接应直接指向真实文件路径，优先打开链接目标；只有当 index.md 不包含候选页面或问题需要跨页面扩展时，才用 Grep 辅助定位
+- **身份索引优先**：`scripts/canonical_map.json` 是编译生成的身份缓存，查询先用它解析 `title` / `alias` / `slug` / `source` 到候选页面。
+- **第一入口始终是 `wiki/index.md`**：它负责确认候选页面的分类、简述和相邻主题，而不是重新做身份解析。
+- **Canonical link 直接打开**：一旦候选页确定，优先沿 canonical link 直接打开真实文件；只有当 `canonical_map.json` 缺失、候选页为空，或问题需要跨页面扩展时，才用 Grep 辅助定位。
+- **多命中时的顺序**：
+  1. 先按 `kind` 消歧：`source`、`concept`、`entity`、`synthesis`
+  2. 再按问题意图消歧：实体/概念优先 concept/entity，流程优先 concept，来源追溯优先 source
+  3. 若仍有多个合理候选，询问用户或写入 `QUESTIONS.md`
 - **读取 frontmatter**：读取目标页面时必须包含 YAML frontmatter，其中的关系字段（`part_of`、`depends_on` 等）是回答关系类问题的关键数据
 
 ### 回答风格
