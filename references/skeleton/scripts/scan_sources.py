@@ -37,6 +37,17 @@ def empty_summary():
 
 def write_plan(plan_path, plan):
     plan_path.parent.mkdir(parents=True, exist_ok=True)
+    if plan_path.is_file():
+        try:
+            existing = json.loads(plan_path.read_text(encoding="utf-8"))
+            existing_without_time = dict(existing)
+            plan_without_time = dict(plan)
+            existing_without_time.pop("generatedAt", None)
+            plan_without_time.pop("generatedAt", None)
+            if existing_without_time == plan_without_time:
+                return
+        except (OSError, json.JSONDecodeError):
+            pass
     plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
