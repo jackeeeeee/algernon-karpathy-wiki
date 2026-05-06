@@ -7,6 +7,7 @@ Wiki 健康检查脚本（确定性检查）
 2. 孤儿页检测 - 查找没有任何入链的 wiki 页面
 3. 空页面检测 - 查找内容为空或仅有模板的页面
 4. 关系一致性 - 自动比对 frontmatter 与正文的关系字段是否一致
+5. Canonical link 检测 - index.md 必须使用真实相对路径链接
 
 注意：过时断言检测、矛盾检测、低置信度检测已由 LLM 负责执行，
       因为这些需要语义理解，正则扫描会产生大量误报。
@@ -48,6 +49,40 @@ def get_title_from_frontmatter(frontmatter):
     """从 frontmatter 提取 title"""
     match = re.search(r'^title:\s*(.+)$', frontmatter, re.MULTILINE)
     return match.group(1).strip().strip('"').strip("'") if match else None
+
+
+def normalize_link_target(target):
+    """规范化 wikilink 目标，移除锚点、扩展名并统一路径分隔符"""
+    target = target.split('#', 1)[0].replace('\\', '/').strip()
+    if target.endswith('.md'):
+        target = target[:-3]
+    return target
+
+
+def build_link_index(wiki_dir):
+    """构建 title、basename、relative path 到实际文件的映射"""
+    link_index = {}
+    path_stems = set()
+    md_files = find_md_files(wiki_dir)
+
+    for f in md_files:
+        rel_path = os.path.relpath(f, wiki_dir)
+        if is_template_file(rel_path):
+            continue
+
+        rel_stem = Path(rel_path).with_suffix('').as_posix()
+        basename = os.path.splitext(os.path.basename(f))[0]
+        content = open(f, 'r', encoding='utf-8').read()
+        fm = extract_frontmatter(content)
+        title = get_title_from_frontmatter(fm)
+
+        path_stems.add(rel_stem)
+        link_index[rel_stem] = f
+        link_index[basename] = f
+        if title:
+            link_index[title] = f
+
+    return link_index, path_stems
 
 
 # --- 关系类型关键词 ---
@@ -143,22 +178,7 @@ def check_broken_links(wiki_dir):
     """检查断链（排除 templates/ 目录下的文件）"""
     issues = []
     md_files = find_md_files(wiki_dir)
-
-    # 构建 title/basename -> 文件路径的映射
-    title_to_path = {}
-    for f in md_files:
-        rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
-            continue
-        content = open(f, 'r', encoding='utf-8').read()
-        fm = extract_frontmatter(content)
-        title = get_title_from_frontmatter(fm)
-        basename = os.path.splitext(os.path.basename(f))[0]
-        # 始终按 basename 索引（无 frontmatter 的文件也能被 wikilink 找到）
-        title_to_path[basename] = f
-        # 有 title 且与 basename 不同时，额外按 title 索引
-        if title and title != basename:
-            title_to_path[title] = f
+    link_index, _ = build_link_index(wiki_dir)
 
     # 检查每个文件的链接（排除 templates/）
     for f in md_files:
@@ -168,8 +188,29 @@ def check_broken_links(wiki_dir):
         content = open(f, 'r', encoding='utf-8').read()
         links = extract_wikilinks(content)
         for link in links:
-            if link not in title_to_path:
+            target = normalize_link_target(link)
+            if target not in link_index:
                 issues.append(f"  断链: {rel_path} -> [[{link}]] (页面不存在)")
+
+    return issues
+
+
+def check_index_canonical_links(wiki_dir):
+    """检查 index.md 是否全部使用 canonical path wikilink"""
+    issues = []
+    index_path = os.path.join(wiki_dir, 'index.md')
+    if not os.path.isfile(index_path):
+        return ["  Canonical link: index.md 不存在"]
+
+    _, path_stems = build_link_index(wiki_dir)
+    content = open(index_path, 'r', encoding='utf-8').read()
+
+    for link in extract_wikilinks(content):
+        target = normalize_link_target(link)
+        if '/' not in target:
+            issues.append(f"  非 canonical 链接: index.md -> [[{link}]] (必须写为 [[path/to/page|显示标题]])")
+        elif target not in path_stems:
+            issues.append(f"  canonical 目标不存在: index.md -> [[{link}]]")
 
     return issues
 
@@ -185,7 +226,7 @@ def check_orphan_pages(wiki_dir):
     for f in md_files:
         content = open(f, 'r', encoding='utf-8').read()
         links = extract_wikilinks(content)
-        all_targets.update(links)
+        all_targets.update(normalize_link_target(link) for link in links)
 
     # 检查每个页面是否被链接
     for f in md_files:
@@ -198,7 +239,9 @@ def check_orphan_pages(wiki_dir):
         content = open(f, 'r', encoding='utf-8').read()
         fm = extract_frontmatter(content)
         title = get_title_from_frontmatter(fm) or os.path.splitext(basename)[0]
-        if title not in all_targets:
+        rel_stem = Path(rel_path).with_suffix('').as_posix()
+        page_keys = {title, os.path.splitext(basename)[0], rel_stem}
+        if not page_keys.intersection(all_targets):
             issues.append(f"  孤儿页: {rel_path} (title='{title}', 无入链)")
 
     return issues
@@ -243,7 +286,7 @@ def main():
 
     all_issues = []
 
-    print("\n[1/4] 检查断链...")
+    print("\n[1/5] 检查断链...")
     broken = check_broken_links(wiki_dir)
     if broken:
         all_issues.extend(broken)
@@ -253,7 +296,7 @@ def main():
     else:
         print("  通过")
 
-    print("\n[2/4] 检查孤儿页...")
+    print("\n[2/5] 检查孤儿页...")
     orphans = check_orphan_pages(wiki_dir)
     if orphans:
         all_issues.extend(orphans)
@@ -263,7 +306,7 @@ def main():
     else:
         print("  通过")
 
-    print("\n[3/4] 检查空页面...")
+    print("\n[3/5] 检查空页面...")
     empty = check_empty_pages(wiki_dir)
     if empty:
         all_issues.extend(empty)
@@ -273,12 +316,22 @@ def main():
     else:
         print("  通过")
 
-    print("\n[4/4] 检查关系一致性...")
+    print("\n[4/5] 检查关系一致性...")
     rel_issues = check_relationship_consistency(wiki_dir)
     if rel_issues:
         all_issues.extend(rel_issues)
         print(f"  发现 {len(rel_issues)} 个问题")
         for issue in rel_issues:
+            print(issue)
+    else:
+        print("  通过")
+
+    print("\n[5/5] 检查 index canonical links...")
+    canonical_issues = check_index_canonical_links(wiki_dir)
+    if canonical_issues:
+        all_issues.extend(canonical_issues)
+        print(f"  发现 {len(canonical_issues)} 个问题")
+        for issue in canonical_issues:
             print(issue)
     else:
         print("  通过")
