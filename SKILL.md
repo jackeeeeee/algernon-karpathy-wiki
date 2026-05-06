@@ -117,6 +117,8 @@ wiki 中所有机器关键入口必须使用 canonical wikilink：`[[相对文�
 
 每个 wiki 页面必须有稳定的机器身份。`slug` 是机器身份，`title` 是人类显示名。
 
+页面归档和新建决策使用 resolver。Ingest、Compile 或任何新建/更新页面操作前，先按 `references/resolver.md` 执行 resolver；只有查询且不改 wiki 时无需读取 resolver。
+
 **页面 frontmatter 必填字段**：
 
 ```yaml
@@ -156,6 +158,7 @@ sources:
 - 脚本负责扫描 frontmatter、生成 identity map、发现缺失和冲突。
 - LLM 只负责脚本标出的语义歧义，例如 alias 归属、页面归类、是否合并。
 - `canonical_map.json` 是编译生成的身份缓存，不手工维护；compile 负责生成，query/lint 负责读取。
+- Resolver 负责判断页面应更新、创建、拆分、合并还是写入 `QUESTIONS.md`；完整规则见 `references/resolver.md`。
 
 ---
 
@@ -207,7 +210,8 @@ sources:
 **流程**：
 
 1. **读取源文件**，通读全文，提取关键概念、实体、技术要点
-2. **创建来源摘要页**：在 `wiki/sources/` 中创建文件，格式：
+2. **执行 resolver**：读取 `scripts/canonical_map.json`，必要时读取 `references/resolver.md`，判断 source、concept、entity、synthesis 应更新还是新建；多候选无法消歧时写入 `wiki/QUESTIONS.md`，不静默任选
+3. **创建/更新来源摘要页**：在 `wiki/sources/` 中创建文件，格式：
    ```markdown
    ---
    title: 来源标题
@@ -228,20 +232,20 @@ sources:
    ## 关键实体
    - [[实体X]]
    ```
-3. **创建/更新概念页**（`wiki/concepts/`）：
+4. **创建/更新概念页**（`wiki/concepts/`）：
    - 提取技术、模式、思想、方法论等抽象概念
    - 已存在 → 补充新信息，注明来源
    - 不存在 → 创建新页面（模板见下方"页面模板"）
-4. **创建/更新实体页**（`wiki/entities/`）：
+5. **创建/更新实体页**（`wiki/entities/`）：
    - 提取人物、工具、机构、项目、论文等具体实体
    - 已存在 → 补充，不存在 → 创建
-5. **跨来源合成**：如果新来源涉及多个已有概念的综合对比，考虑在 `wiki/synthesis/` 创建综合分析页
-6. **写入关系字段**：在 frontmatter 中添加关系类型字段（如 `part_of:`、`depends_on:`），同步在正文 `## 关系` 区块写 `@type` 链接。关系标注是编译过程中的必选步骤，即使暂无关系也应保留空 `## 关系` 区块。关系词汇表和写法见底部"参考"部分。
+6. **跨来源合成**：如果 resolver 判断新来源涉及多个已有概念的综合对比，考虑在 `wiki/synthesis/` 创建综合分析页
+7. **写入关系字段**：在 frontmatter 中添加关系类型字段（如 `part_of:`、`depends_on:`），同步在正文 `## 关系` 区块写 `@type` 链接。关系标注是编译过程中的必选步骤，即使暂无关系也应保留空 `## 关系` 区块。关系词汇表和写法见底部"参考"部分。
 
 **页面命名规范**：
 - 根据文档内容选择稳定 slug（推荐英文 kebab-case；确需中文时也必须稳定）
 - frontmatter 中 `title` 保持人类可读标题，`slug` 必须等于相对路径去掉 `.md`
-- 新建页面前先执行 Identity Resolution 规则，避免重复建页
+- 新建页面前先执行 Identity Resolution 和 Resolver 规则，避免重复建页和目录混用
 
 **来源标注**：正文中每个关键断言后加 `^[来源路径]`，例如：
 > LLM 消除了知识维护的簿记难题。^[raw/articles/karpathy-llm-wiki-research.md]
@@ -271,7 +275,7 @@ sources:
      - hash 变化 → 标记为 update
      - hash 未变 → 跳过
      - 文件已删除（在 state 中但磁盘不存在）→ 标记为 deleted
-4. **处理文件**：对标记为 ingest/update 的文件执行 Ingest 流程
+4. **处理文件**：对标记为 ingest/update 的文件执行 Ingest 流程。处理每个文件前先读取 `scripts/canonical_map.json` 并按 resolver 判断目标页面；新事实影响多个已有页面时更新多个页面，不为每个来源另起重复概念页。
 5. **更新编译状态**：将所有处理过的文件写入 compile-state.json，记录当前 hash 和对应的 wiki 页面
 6. **生成 canonical_map.json**：调用 `scripts/build-canonical-map.py` 扫描 `wiki/**/*.md` 和 frontmatter，输出 `scripts/canonical_map.json`。
 7. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 前先读取 `canonical_map.json` 或扫描 frontmatter 构建 identity map，再按 `kind` 分组生成条目。index.md 必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
@@ -356,6 +360,7 @@ LLM 自行判断问题意图类型，选择对应检索策略：
   2. 再按问题意图消歧：实体/概念优先 concept/entity，流程优先 concept，来源追溯优先 source
   3. 若仍有多个合理候选，询问用户或写入 `QUESTIONS.md`
 - **读取 frontmatter**：读取目标页面时必须包含 YAML frontmatter，其中的关系字段（`part_of`、`depends_on` 等）是回答关系类问题的关键数据
+- **不改归档类型**：Query 只解析和回答；如果发现页面归档疑似错误，记录到 `QUESTIONS.md` 或维护 backlog，不在查询中擅自移动页面。
 
 ### 回答风格
 

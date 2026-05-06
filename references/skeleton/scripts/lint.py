@@ -92,7 +92,7 @@ def build_link_index(wiki_dir):
 
     for f in md_files:
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
 
         rel_stem = Path(rel_path).with_suffix('').as_posix()
@@ -121,7 +121,7 @@ def build_identity_maps(wiki_dir):
 
     for f in md_files:
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
 
         content = open(f, 'r', encoding='utf-8').read()
@@ -209,7 +209,7 @@ def get_page_identity(wiki_dir):
     index = {}
     for f in find_md_files(wiki_dir):
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
         content = open(f, 'r', encoding='utf-8').read()
         fm = extract_frontmatter(content)
@@ -232,6 +232,12 @@ def is_template_file(rel_path):
     return rel_path.startswith('templates' + os.sep) or rel_path.startswith('templates/')
 
 
+def is_maintenance_file(rel_path):
+    """判断是否为维护说明文件，不参与知识图谱检查"""
+    normalized = rel_path.replace('\\', '/')
+    return normalized == 'RESOLVER.md' or normalized.endswith('/README.md')
+
+
 def check_relationship_consistency(wiki_dir):
     """检查 frontmatter 与正文关系字段是否一致，并做轻量方向护栏"""
     issues = []
@@ -245,7 +251,7 @@ def check_relationship_consistency(wiki_dir):
         if basename in exclude_basenames:
             continue
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
 
         content = open(f, 'r', encoding='utf-8').read()
@@ -302,7 +308,7 @@ def check_broken_links(wiki_dir):
     # 检查每个文件的链接（排除 templates/）
     for f in md_files:
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
         content = open(f, 'r', encoding='utf-8').read()
         links = extract_wikilinks(content)
@@ -395,7 +401,7 @@ def check_orphan_pages(wiki_dir):
         if basename in exclude_basenames:
             continue
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
         content = open(f, 'r', encoding='utf-8').read()
         fm = extract_frontmatter(content)
@@ -419,7 +425,7 @@ def check_empty_pages(wiki_dir):
         if basename in exclude_basenames:
             continue
         rel_path = os.path.relpath(f, wiki_dir)
-        if is_template_file(rel_path):
+        if is_template_file(rel_path) or is_maintenance_file(rel_path):
             continue
         content = open(f, 'r', encoding='utf-8').read()
         fm = extract_frontmatter(content)
