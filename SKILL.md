@@ -81,6 +81,36 @@ description: >
 
 ---
 
+## Canonical Link 规则
+
+wiki 中所有机器关键入口必须使用 canonical wikilink：`[[相对文件路径不含.md|显示标题]]`。
+
+**推荐**：
+
+```markdown
+[[concepts/nms-deploy|NMS 部署流程]]
+[[entities/oss-nms|OSS-NMS]]
+[[sources/dgs-module|DGS 模块深度分析]]
+```
+
+**禁止作为 index/关系/query 引用入口**：
+
+```markdown
+[[NMS 部署流程]]
+[[OSS-NMS]]
+[[DGS 模块深度分析]]
+```
+
+规则：
+- `title` 只做人类显示名，不作为机器解析目标。
+- `wiki/index.md` 中每个页面条目必须使用 canonical link，不能使用 title-only link。
+- 页面正文、关系区块和回答引用优先使用 canonical link。
+- 新建或更新页面后，更新 index 时先根据实际文件路径生成链接；如 `wiki/concepts/nms-deploy.md` → `[[concepts/nms-deploy|NMS 部署流程]]`。
+- 当 source 页和 concept 页同名时，必须用路径区分；例如 `[[sources/nms-deploy|NMS 部署流程]]` 与 `[[concepts/nms-deploy|NMS 部署流程]]`。
+- 只有当链接目标的真实文件 basename 与显示名完全一致时，才允许短链接；index 中仍不使用短链接。
+
+---
+
 ## 能力一：Init（初始化）
 
 当用户要求"初始化知识库"或"init"时，执行此能力。
@@ -191,7 +221,7 @@ description: >
      - 文件已删除（在 state 中但磁盘不存在）→ 标记为 deleted
 4. **处理文件**：对标记为 ingest/update 的文件执行 Ingest 流程
 5. **更新编译状态**：将所有处理过的文件写入 compile-state.json，记录当前 hash 和对应的 wiki 页面
-6. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）
+6. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 时必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
 7. **报告编译结果**：处理了多少文件，创建/更新了多少页面，跳过了多少
 
 **编译状态文件格式**：
@@ -225,6 +255,7 @@ hash 基于内容计算，不随文件移动而变。文件移动但内容不变
 2. 孤儿页检测：无入链的页面（排除 overview.md、index.md、log.md、QUESTIONS.md 及 templates/ 目录）
 3. 空页面检测：内容仅模板占位符
 4. 关系一致性：自动比对 frontmatter 与正文的关系字段是否一致
+5. Canonical link 检查：`index.md` 和机器关键入口不能使用只能靠 title 解析的 wikilink
 
 **LLM 专属检查**（脚本无法替代）：
 5. **过时断言**：扫描"目前/现在/latest/currently"等时间词，**仅当同句有版本号或具体日期时才标记**
@@ -246,27 +277,27 @@ LLM 自行判断问题意图类型，选择对应检索策略：
 
 | 意图 | 典型问法 | 检索策略 |
 |------|---------|---------|
-| **entity**（实体/概念） | "X 是什么"、"tell me about X"、"X 有哪几种" | 读 `index.md` → 定位概念/实体页 → 简洁回答 |
-| **relationship**（关系） | "A 和 B 什么关系"、"X 依赖什么"、"X 调用谁" | 读 `index.md` → 读双方页面 + frontmatter 关系字段 → 回答关系 |
-| **procedural**（流程/方法） | "部署流程是什么"、"怎么做 X"、"X 的步骤" | 读 `index.md` → 读流程相关页面 → 详细分步回答 |
+| **entity**（实体/概念） | "X 是什么"、"tell me about X"、"X 有哪几种" | 读 `index.md` → 根据 canonical link 直接打开概念/实体页 → 简洁回答 |
+| **relationship**（关系） | "A 和 B 什么关系"、"X 依赖什么"、"X 调用谁" | 读 `index.md` → 根据 canonical link 直接打开双方页面 + frontmatter 关系字段 → 回答关系 |
+| **procedural**（流程/方法） | "部署流程是什么"、"怎么做 X"、"X 的步骤" | 读 `index.md` → 根据 canonical link 直接打开流程相关页面 → 详细分步回答 |
 | **general**（综合） | "X 整体架构"、"X 和 Y 对比"、开放性问题 | 读 `index.md` → 用关键词 grep 定位多页面 → 综合回答 |
 
 ### 检索流程
 
 ```
 用户问题 → LLM 判断意图类型 → 读 index.md 定位候选页面
-  → Grep 关键词进一步定位 → 读取目标页面（含 frontmatter 关系字段）
+  → 根据 canonical link 直接读取目标页面（含 frontmatter 关系字段）
   → 综合回答（精准、克制，只回答所问） → 判断是否归档
 ```
 
 - **第一入口始终是 `wiki/index.md`**：它包含所有页面的分类索引和一句话描述
-- **Grep 辅助定位**：当 index.md 一句话描述不够精确时，用 Grep 搜索关键词定位具体页面
+- **Canonical link 直接打开**：index.md 的链接应直接指向真实文件路径，优先打开链接目标；只有当 index.md 不包含候选页面或问题需要跨页面扩展时，才用 Grep 辅助定位
 - **读取 frontmatter**：读取目标页面时必须包含 YAML frontmatter，其中的关系字段（`part_of`、`depends_on` 等）是回答关系类问题的关键数据
 
 ### 回答风格
 
 - **精准克制**：只回答用户问的内容，不主动展开到相关话题
-- **有根据**：每个关键断言后标注引用的 wiki 页面（如 `[[业务拨测]]`）
+- **有根据**：每个关键断言后标注引用的 wiki 页面，优先使用 canonical link（如 `[[concepts/business-probe|业务拨测]]`）
 - **结构化**：流程类用编号列表，对比类用表格，概念类用定义+要点
 - **承认缺失**：如果 wiki 中没有相关信息，明确告知用户知识缺口
 
