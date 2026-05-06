@@ -1,7 +1,7 @@
-# 源文件目录注册表
+# Source Registry
 
-> 记录散落在项目各处的源文件目录。编译时 LLM 扫描这些目录中的文件进行编译。
-> 文件移动后只需更新此表，无需修改 wiki 页面。
+Compile uses this table as a strict machine-readable contract. Do not rename columns.
 
-| 逻辑名 | 路径 | 说明 |
-|--------|------|------|
+| logical | path | kind | include | exclude | enabled |
+|---|---|---|---|---|---|
+| example | raw/articles | directory | **/*.md |  | false |

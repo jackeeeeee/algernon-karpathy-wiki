@@ -266,20 +266,39 @@ sources:
 
 **流程**：
 
-1. **读源目录注册表**：读取 `raw/registry.md` 获取所有源目录路径
-2. **读编译状态**：读取 `scripts/compile-state.json` 获取上次编译的文件快照。如果 state 文件不存在或 files 为空，视为首次编译，所有文件标记为 ingest。
-3. **增量扫描**：遍历所有源目录，对每个文件：
-   - 计算当前文件内容的 MD5 hash（`hashlib.md5(content).hexdigest()[:8]`）
-   - 对比 compile-state.json 中的历史 hash（空 hash 视为变化，触发 update）：
-     - 新文件（不在 state 中）→ 标记为 ingest
-     - hash 变化 → 标记为 update
-     - hash 未变 → 跳过
-     - 文件已删除（在 state 中但磁盘不存在）→ 标记为 deleted
-4. **处理文件**：对标记为 ingest/update 的文件执行 Ingest 流程。处理每个文件前先读取 `scripts/canonical_map.json` 并按 resolver 判断目标页面；新事实影响多个已有页面时更新多个页面，不为每个来源另起重复概念页。
-5. **更新编译状态**：将所有处理过的文件写入 compile-state.json，记录当前 hash 和对应的 wiki 页面
+1. **生成 compile plan**：运行 `scripts/scan_sources.py`，严格校验 `raw/registry.md`，扫描源文件，计算 hash，对比 `scripts/compile-state.json`，输出 `scripts/compile-plan.json`。
+2. **失败即停**：如果脚本退出码非 0，或 `compile-plan.json` 中 `status` 为 `error`，停止 Compile；向用户报告 registry/schema/path 错误，不继续读取源文件。
+3. **处理变更文件**：只处理 plan 中 `action` 为 `ingest`、`update`、`delete` 的项目：
+   - `ingest`：新来源，执行 Ingest 流程。
+   - `update`：内容 hash 变化，执行 Ingest/更新流程。
+   - `delete`：源文件在 state 中存在但磁盘缺失，不自动删除 wiki 页；列出旧 `wikiPages`，写入 `QUESTIONS.md` 或报告，等待用户确认。
+   - `skip`：hash 未变，不读、不总结、不重编译。
+4. **执行 resolver**：处理每个 ingest/update 文件前读取 `scripts/canonical_map.json` 并按 resolver 判断目标页面；新事实影响多个已有页面时更新多个页面，不为每个来源另起重复概念页。
+5. **更新编译状态**：处理完成后更新 `scripts/compile-state.json`，记录当前 hash、lastProcessed 和对应 wikiPages。`scan_sources.py` 不直接修改 state。
 6. **生成 canonical_map.json**：调用 `scripts/build-canonical-map.py` 扫描 `wiki/**/*.md` 和 frontmatter，输出 `scripts/canonical_map.json`。
 7. **收尾**：统一更新 index.md（加入新页面）、overview.md（刷新 Health Dashboard 统计）和 log.md（追加本次编译记录）。更新 index.md 前先读取 `canonical_map.json` 或扫描 frontmatter 构建 identity map，再按 `kind` 分组生成条目。index.md 必须使用 Canonical Link 规则：`[[concepts/page-slug|页面标题]]`、`[[entities/page-slug|页面标题]]`、`[[sources/page-slug|页面标题]]`，禁止 `[[页面标题]]`。
-8. **报告编译结果**：处理了多少文件，创建/更新了多少页面，跳过了多少
+8. **运行 lint 并报告结果**：报告 ingest/update/delete/skip/error 数量，创建/更新了多少页面，跳过了多少。
+
+### Registry schema
+
+`raw/registry.md` 是 Compile 的稳定输入契约，必须使用固定 Markdown 表格：
+
+```markdown
+# Source Registry
+
+| logical | path | kind | include | exclude | enabled |
+|---|---|---|---|---|---|
+| personal-dev-clone | D:/F/LLMwiki/skills/personal-dev-clone | directory | **/*.md |  | true |
+```
+
+校验规则：
+- 表头必须完全为 `logical | path | kind | include | exclude | enabled`。
+- `logical` 必须唯一，只允许 `[A-Za-z0-9._-]`，不能含 `/` 或 `\`。
+- `path` 必须存在，可为绝对路径或相对知识库根路径。
+- `kind` 只能是 `directory` 或 `file`。
+- `kind=directory` 时 `include` 必填；`exclude` 可空，多个 glob 用 `;` 分隔。
+- `enabled` 只能是 `true` 或 `false`。
+- registry 校验失败时，不继续 Compile。
 
 **编译状态文件格式**：
 ```json
