@@ -56,16 +56,22 @@ description: >
 |------|------|------|
 | calls | A 调用 B 的接口/API | DGS 数据同步 calls NMS 接口 |
 | depends_on | A 依赖 B | DGS 告警聚合 depends_on 节点状态 |
-| defines | A 定义了 B | 策略模块 defines 策略接口 |
-| implements | A 实现了 B 模式 | 策略模式 implements 策略设计模式 |
+| defines | A 定义了 B（配置、接口、字段、规则） | NMSInterface.json defines 接口映射 |
+| implements | A 实现了 B 模式/接口/协议 | 策略实现 implements 策略模式 |
 | queries | A 查询 B 的数据库 | 巡检服务 queries 设备状态表 |
 | triggers | A 触发 B | 节点离线 triggers 告警 |
 | configures | A 配置 B | Nacos 配置 configures 刷新频率 |
 | transforms | A 转换成 B 格式 | 解析器 transforms EIAP 数据 |
-| part_of | A 是 B 的子模块 | 告警聚合 part_of DGS 监控 |
-| related_to | 其他关联 | 知识管理 related_to Karpathy LLM Wiki |
+| part_of | A 是 B 的组成部分，只存子 -> 父 | 告警聚合 part_of DGS 监控 |
+| related_to | 其他关联，不参与强推理 | 知识管理 related_to Karpathy LLM Wiki |
 
-拿不准时先用 `related_to`，后续确认有价值再拆分。
+方向规则：
+- `part_of` 只写子 -> 父；父页面不要把“包含子模块”写成反向 `part_of`。
+- 不双写 `contains`/`has_part`，查询时从子页面 `part_of` 反查。
+- `implements` 只用于具体实现 -> 抽象模式/接口/协议。
+- `defines` 只用于定义者 -> 被定义物，不表示普通包含。
+- `kind: source` 页面不进入领域关系图，只保留普通关键概念/关键实体链接。
+- 拿不准时先用 `related_to` 或普通 wikilink，并记录待确认问题。
 
 ## 页面模板
 

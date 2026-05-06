@@ -6,7 +6,7 @@ Wiki 健康检查脚本（确定性检查）
 1. 断链检测 - 查找 [[wikilinks]] 中指向不存在页面的链接
 2. 孤儿页检测 - 查找没有任何入链的 wiki 页面
 3. 空页面检测 - 查找内容为空或仅有模板的页面
-4. 关系一致性 - 自动比对 frontmatter 与正文的关系字段是否一致
+4. 关系一致性 - 自动比对 frontmatter 与正文的关系三元组是否一致
 5. Canonical link 检测 - index.md 必须使用真实相对路径链接
 
 注意：过时断言检测、矛盾检测、低置信度检测已由 LLM 负责执行，
@@ -149,26 +149,31 @@ RELATION_TYPES = [
     'triggers', 'configures', 'transforms', 'part_of', 'related_to'
 ]
 
+DOMAIN_RELATION_TYPES = [
+    'calls', 'depends_on', 'defines', 'implements', 'queries',
+    'triggers', 'configures', 'transforms', 'part_of'
+]
+
 
 def extract_fm_relationships(fm_text):
-    """从 frontmatter 文本中提取关系链接列表"""
-    links = []
+    """从 frontmatter 文本中提取 (关系类型, 链接目标) 三元组片段"""
+    relationships = []
     lines = fm_text.split('\n')
-    in_rel_key = False
+    in_rel_key = None
     for line in lines:
         # Check if this line starts a relationship key
         matched_key = False
         for rtype in RELATION_TYPES:
             if re.match(rf'^{rtype}:\s*$', line):
-                in_rel_key = True
+                in_rel_key = rtype
                 matched_key = True
                 break
             elif re.match(rf'^{rtype}:\s*-', line):
                 # Single-line: key: - "[[...]]"
                 m = re.search(r'\[\[([^\]]+)\]\]', line)
                 if m:
-                    links.append(m.group(1))
-                in_rel_key = False
+                    relationships.append((rtype, normalize_link_target(m.group(1))))
+                in_rel_key = None
                 matched_key = True
                 break
         if matched_key:
@@ -177,21 +182,49 @@ def extract_fm_relationships(fm_text):
         if in_rel_key:
             m = re.search(r'\[\[([^\]]+)\]\]', line)
             if m:
-                links.append(m.group(1))
+                relationships.append((in_rel_key, normalize_link_target(m.group(1))))
             elif re.match(r'^[a-z]', line) and not line.startswith(' '):
                 # New top-level key, stop collecting
-                in_rel_key = False
-    return sorted(links)
+                in_rel_key = None
+    return sorted(relationships)
 
 
 def extract_body_relationships(body_text):
-    """从正文 ## 关系 区块提取链接列表"""
+    """从正文 ## 关系 区块提取 (关系类型, 链接目标) 三元组片段"""
     rel_section_match = re.search(r'^## 关系\s*\n(.*?)(?=^## |\Z)', body_text, re.MULTILINE | re.DOTALL)
     if not rel_section_match:
         return []
     rel_text = rel_section_match.group(1)
-    links = re.findall(r'→ \[\[([^\]|]+)(?:\|[^\]]+)?\]\]', rel_text)
-    return sorted(links)
+    relationships = []
+    for target, label in re.findall(r'→ \[\[([^\]|]+)(?:\|([^\]]+))?\]\]', rel_text):
+        label_text = label or target
+        type_match = re.search(r'@([A-Za-z_][A-Za-z0-9_-]*)\b', label_text)
+        if type_match:
+            relationships.append((type_match.group(1), normalize_link_target(target)))
+    return sorted(relationships)
+
+
+def get_page_identity(wiki_dir):
+    """返回 path/title/basename 到页面元数据的索引"""
+    index = {}
+    for f in find_md_files(wiki_dir):
+        rel_path = os.path.relpath(f, wiki_dir)
+        if is_template_file(rel_path):
+            continue
+        content = open(f, 'r', encoding='utf-8').read()
+        fm = extract_frontmatter(content)
+        rel_stem = Path(rel_path).with_suffix('').as_posix()
+        title = get_title_from_frontmatter(fm) or os.path.splitext(os.path.basename(f))[0]
+        page = {
+            'path': rel_stem,
+            'rel_path': rel_path,
+            'title': title,
+            'kind': get_field_from_frontmatter(fm, 'kind'),
+        }
+        index[rel_stem] = page
+        index[os.path.splitext(os.path.basename(f))[0]] = page
+        index[title] = page
+    return index
 
 
 def is_template_file(rel_path):
@@ -200,10 +233,12 @@ def is_template_file(rel_path):
 
 
 def check_relationship_consistency(wiki_dir):
-    """检查 frontmatter 与正文关系字段是否一致"""
+    """检查 frontmatter 与正文关系字段是否一致，并做轻量方向护栏"""
     issues = []
     md_files = find_md_files(wiki_dir)
     exclude_basenames = {'index.md', 'overview.md', 'log.md', 'QUESTIONS.md'}
+    page_index = get_page_identity(wiki_dir)
+    part_of_edges = []
 
     for f in md_files:
         basename = os.path.basename(f)
@@ -218,16 +253,42 @@ def check_relationship_consistency(wiki_dir):
         if not fm:
             continue
 
-        has_rel = any(re.search(rf'^{rtype}:', fm, re.MULTILINE) for rtype in RELATION_TYPES)
-        if not has_rel:
+        body = content[len(fm) + 7:] if fm else content
+        kind = get_field_from_frontmatter(fm, 'kind')
+        fm_relationships = extract_fm_relationships(fm)
+        body_relationships = extract_body_relationships(body)
+        if not fm_relationships and not body_relationships:
             continue
 
-        body = content[len(fm) + 7:] if fm else content
-        fm_links = extract_fm_relationships(fm)
-        body_links = extract_body_relationships(body)
+        if kind == 'source':
+            domain_relationships = [
+                rel for rel in fm_relationships + body_relationships
+                if rel[0] in DOMAIN_RELATION_TYPES
+            ]
+            if domain_relationships:
+                issues.append(f"  source 领域关系: {rel_path} 使用了领域关系字段，source 页只保留普通关键概念/实体链接")
 
-        if fm_links != body_links:
-            issues.append(f"  关系不一致: {rel_path} (Frontmatter: {len(fm_links)} 条 vs 正文: {len(body_links)} 条)")
+        if fm_relationships != body_relationships:
+            fm_only = sorted(set(fm_relationships) - set(body_relationships))
+            body_only = sorted(set(body_relationships) - set(fm_relationships))
+            issues.append(
+                f"  关系不一致: {rel_path} "
+                f"(frontmatter_only={fm_only}, body_only={body_only})"
+            )
+
+        subject = Path(rel_path).with_suffix('').as_posix()
+        for rtype, target in fm_relationships:
+            if rtype == 'part_of':
+                target_page = page_index.get(target)
+                if target_page:
+                    part_of_edges.append((subject, target_page['path'], rel_path))
+
+    edge_set = {(src, dst) for src, dst, _ in part_of_edges}
+    for src, dst, rel_path in part_of_edges:
+        if src == dst:
+            issues.append(f"  part_of 自循环: {rel_path} 指向自己")
+        if (dst, src) in edge_set:
+            issues.append(f"  part_of 互相包含: {src} <-> {dst}，请人工确认父子方向")
 
     return issues
 
@@ -386,7 +447,7 @@ def main():
 
     all_issues = []
 
-    print("\n[1/5] 检查断链...")
+    print("\n[1/6] 检查断链...")
     broken = check_broken_links(wiki_dir)
     if broken:
         all_issues.extend(broken)
@@ -396,7 +457,7 @@ def main():
     else:
         print("  通过")
 
-    print("\n[2/5] 检查孤儿页...")
+    print("\n[2/6] 检查孤儿页...")
     orphans = check_orphan_pages(wiki_dir)
     if orphans:
         all_issues.extend(orphans)
@@ -406,7 +467,7 @@ def main():
     else:
         print("  通过")
 
-    print("\n[3/5] 检查空页面...")
+    print("\n[3/6] 检查空页面...")
     empty = check_empty_pages(wiki_dir)
     if empty:
         all_issues.extend(empty)
@@ -416,7 +477,7 @@ def main():
     else:
         print("  通过")
 
-    print("\n[4/5] 检查关系一致性...")
+    print("\n[4/6] 检查关系一致性...")
     rel_issues = check_relationship_consistency(wiki_dir)
     if rel_issues:
         all_issues.extend(rel_issues)

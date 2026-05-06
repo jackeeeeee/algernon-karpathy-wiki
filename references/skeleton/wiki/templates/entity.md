@@ -10,7 +10,7 @@ sources: []
 part_of: []
 depends_on: []
 triggers: []
-# 其他关系字段按需添加
+# 其他关系字段按需添加；`part_of` 只写子 -> 父
 ---
 
 # {{title}}

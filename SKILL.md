@@ -307,10 +307,11 @@ hash 基于内容计算，不随文件移动而变。文件移动但内容不变
 1. 断链检测：`[[wikilinks]]` 指向不存在的页面
 2. 孤儿页检测：无入链的页面（排除 overview.md、index.md、log.md、QUESTIONS.md 及 templates/ 目录）
 3. 空页面检测：内容仅模板占位符
-4. 关系一致性：自动比对 frontmatter 与正文的关系字段是否一致
+4. 关系一致性：自动比对 frontmatter 与正文的关系三元组（关系类型 + 目标）是否一致
 5. Canonical link 检查：`index.md` 和机器关键入口不能使用只能靠 title 解析的 wikilink
 6. Identity 检查：缺 `slug`、slug 与路径不一致、slug 冲突、alias 冲突、同 kind title 重复
 7. Canonical map 检查：`scripts/canonical_map.json` 与 frontmatter 一致，且由 compile 自动生成
+8. 关系语义护栏：`kind: source` 页面不得写领域关系字段；`part_of` 不得自循环或互相包含
 
 **LLM 专属检查**（脚本无法替代）：
 5. **过时断言**：扫描"目前/现在/latest/currently"等时间词，**仅当同句有版本号或具体日期时才标记**
@@ -396,16 +397,23 @@ LLM 自行判断问题意图类型，选择对应检索策略：
 |------|------|------|
 | calls | A 调用 B 的接口/API | DGS 数据同步 calls NMS 接口 |
 | depends_on | A 依赖 B（运行时/配置依赖） | DGS 告警聚合 depends_on DGS 节点在线状态 |
-| defines | A 定义了 B（类、函数、配置项） | 拨测策略模块 defines 拨测策略接口 |
-| implements | A 实现了 B 模式/协议/接口 | 拨测策略模式 implements 策略模式 |
+| defines | A 定义了 B（类、函数、配置项、规则） | NMSInterface.json defines 接口权限映射 |
+| implements | A 实现了 B 模式/协议/接口 | 拨测策略实现 implements 策略模式 |
 | queries | A 查询 B 的数据库/表/缓存 | 巡检服务 queries 设备状态表 |
 | triggers | A 触发 B（事件/告警/任务/定时器） | 节点离线 triggers DGS 节点离线告警 |
 | configures | A 配置 B（配置项控制的行为） | Nacos 配置项 configures DGS 刷新频率 |
 | transforms | A 把数据转换成 B 格式/状态 | 数据源解析 transforms EIAP 数据为统一格式 |
-| part_of | A 属于 B 的子模块 | DGS 告警聚合 part_of DGS |
-| related_to | 其他关联 | 知识管理实践 related_to Karpathy LLM Wiki |
+| part_of | A 是 B 的组成部分；只存子 -> 父主方向 | DGS 告警聚合 part_of DGS 数据联网监控 |
+| related_to | 其他关联，不参与强推理 | 知识管理实践 related_to Karpathy LLM Wiki |
 
-拿不准时先用 `related_to`，后续确认有价值再拆分。已有类型不删除，标记 deprecated 即可。
+### 关系方向规则
+
+- `part_of` 只存主方向：子模块/子流程/子组件 -> 父系统/父模块。父页面想表达“包含哪些子模块”时，不写反向 `part_of`；查询时从子页面的 `part_of` 反查即可。
+- 不维护 `contains`/`has_part` 双写边，避免正反两套边漂移。
+- `implements` 只用于“具体实现 -> 抽象模式/接口/协议”，不能用于“包含某流程”。
+- `defines` 只用于“定义者 -> 被定义物”，例如配置文件定义接口映射；不能用于普通“包含模块”。
+- `kind: source` 页面代表来源文档，不进入领域关系图；source 页只保留“关键概念/关键实体/相关链接”等普通 wikilink，不写 `part_of`、`depends_on`、`calls`、`implements`、`defines` 等领域关系字段。
+- 拿不准时先用 `related_to`，或只写普通 wikilink，并在 `QUESTIONS.md` 记录待确认关系。已有类型不删除，标记 deprecated 即可。
 
 ### Agent 自主扩展
 
